@@ -103,9 +103,9 @@ func main() {
 		log.Fatal(fmt.Sprintf("[%vERROR%v] From: %v and To: %v values don't make sense.\n", BrightRed, Reset, *fromPtr, *toPtr))
 	}
 
-	logFile, err := os.OpenFile("gogoanime-errors.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	logFile, err := os.OpenFile("gogoanime-errors.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
-		log.Fatal(fmt.Sprintf("[%vFATAL%v] Failed to create log file.\n%v", BrightRed, Reset, err))
+		log.Fatal(fmt.Sprintf("[%vFATAL%v] Failed to open/create log file.\n%v", BrightRed, Reset, err))
 	}
 	defer logFile.Close()
 	log.SetOutput(logFile)
@@ -169,7 +169,7 @@ func main() {
 		fmt.Printf("\t[%v*%v] Episode Quality: %v\n", BrightGreen, Reset, episodeQuality)
 		fmt.Printf("\t[%v*%v] Episode Size: %v MB\n", BrightGreen, Reset, (fileResp.ContentLength / (1024 * 1024)))
 
-		episodeFile, err := os.Create(fmt.Sprintf("%v.mp4", i))
+		episodeFile, err := os.OpenFile(fmt.Sprintf("%v.mp4", i), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 		if err != nil {
 			log.Print(err)
 			log.Fatal(fmt.Sprintf("[%vFATAL%v] Failed to create episode file.\n%v", BrightRed, Reset, err))
