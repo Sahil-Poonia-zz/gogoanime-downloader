@@ -18,6 +18,6 @@ Usage of ./gogoanime-downloader-mac-arm64:
 it's pretty simple to use and should be very clear from help menu.
 
 Output sample:
-![Sample Output](./screenshot/sampleOutput.png)
+![Sample Output](./screenshots/sampleOutput.png)
 
 Thanks for your interest!! 🤗
