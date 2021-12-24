@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"time"
@@ -22,6 +23,62 @@ const (
 	BrightWhite  = "\u001b[37;1m"
 	Reset        = "\u001b[0m"
 )
+
+type Episode struct {
+	PageLink         string
+	DownloadPageLink string
+	Resolution       string
+	Size             uint64
+	AllDownloadLinks map[string]string
+}
+
+func (e *Episode) isRes(res string) bool {
+	_, exists := e.AllDownloadLinks[res]
+	return exists
+}
+
+func (e *Episode) GetDownloadPageLink(n *html.Node) {
+	if n.Type == html.ElementNode && n.Data == "li" && n.FirstChild != nil && n.FirstChild.Data == "a" {
+		for _, liAttr := range n.Attr {
+			if liAttr.Key == "class" && liAttr.Val == "dowloads" {
+				for _, aAttr := range n.FirstChild.Attr {
+					if aAttr.Key == "href" {
+						e.DownloadPageLink = aAttr.Val
+					}
+				}
+			}
+		}
+	}
+
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		e.GetDownloadPageLink(c)
+	}
+}
+
+func (e *Episode) GetDownloadLinks(n *html.Node) {
+	if n.Type == html.ElementNode && n.Data == "a" {
+		for _, attr := range n.Attr {
+			if attr.Key == "download" {
+				var quality string
+				for _, char := range n.FirstChild.Data {
+					if string(char) == "P" {
+						break
+					}
+					charNum, err := strconv.ParseInt(string(char), 10, 64)
+					if err != nil {
+						continue
+					}
+					quality += strconv.Itoa(int(charNum))
+				}
+				e.AllDownloadLinks[quality] = n.Attr[0].Val
+			}
+		}
+	}
+
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		e.GetDownloadLinks(c)
+	}
+}
 
 func GetRequest(targetURL string) (*http.Response, error) {
 	req, err := http.NewRequest("GET", targetURL, nil)
@@ -47,142 +104,143 @@ func GetRequest(targetURL string) (*http.Response, error) {
 	return nil, fmt.Errorf("GetRequest(): %v", fetchErr)
 }
 
-func dowPgLinkParser(n *html.Node, resultant *string) {
-	if n.Type == html.ElementNode && n.Data == "li" && n.FirstChild != nil && n.FirstChild.Data == "a" {
-		for _, liAttr := range n.Attr {
-			if liAttr.Key == "class" && liAttr.Val == "dowloads" {
-				for _, aAttr := range n.FirstChild.Attr {
-					if aAttr.Key == "href" {
-						*resultant = aAttr.Val
-					}
-				}
-			}
-		}
-	}
-
-	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		dowPgLinkParser(c, resultant)
-	}
+func bytesToMB(size uint64) float64 {
+	return float64(size) / float64(1024*1024)
 }
 
-func dowLinkParser(n *html.Node, resultant map[string]string) {
-	if n.Type == html.ElementNode && n.Data == "a" {
-		for _, attr := range n.Attr {
-			if attr.Key == "download" {
-				var quality string
-				for _, char := range n.FirstChild.Data {
-					if string(char) == "P" {
-						break
-					}
-					charNum, err := strconv.ParseInt(string(char), 10, 64)
-					if err != nil {
-						continue
-					}
-					quality += strconv.Itoa(int(charNum))
-				}
-				resultant[quality] = n.Attr[0].Val
-			}
-		}
+type WriteCounter struct {
+	Total uint64
+}
+
+func (wc *WriteCounter) Write(p []byte) (int, error) {
+	n := len(p)
+	wc.Total += uint64(n)
+	wc.PrintProgress()
+	return n, nil
+}
+
+func (wc *WriteCounter) PrintProgress() {
+	fmt.Printf("\r")
+	fmt.Printf("\t[%vDOWNLOADING%v] %.2f MB complete", BrightYellow, Reset, bytesToMB(wc.Total))
+}
+
+func DownloadFile(fileName string, resp *http.Response) error {
+	file, err := os.Create(fileName)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	counter := &WriteCounter{}
+	_, err = io.Copy(file, io.TeeReader(resp.Body, counter))
+	if err != nil {
+		return err
 	}
 
-	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		dowLinkParser(c, resultant)
-	}
+	return nil
 }
 
 func main() {
+	// CLI flags
 	urlPtr := flag.String("url", "", "URL of episode page but without episode number.\n(ex: 'https://gogoanime.wiki/dragon-ball-super-dub-episode-' Note that link does not contain\nepisode number at the end )")
 	fromPtr := flag.Int("from", 1, "episode number you want to download from.")
 	toPtr := flag.Int("to", 1, "episode number you want to download to.")
 	flag.Parse()
 
+	// Flag input validation
+	u, err := url.Parse(*urlPtr)
 	switch {
 	case *urlPtr == "":
 		log.Fatal(fmt.Sprintf("[%vERROR%v] URL is required.\n", BrightRed, Reset))
+	case err != nil, u.Scheme != "https", u.Host != "gogoanime.wiki", string(u.Path[len(u.Path)-1]) != "-":
+		log.Fatal(fmt.Sprintf("[%vERROR%v] Invalid URL: %v\n\fpass -h or --help argument for help menu.", BrightRed, Reset, *urlPtr))
 	case *fromPtr < 1, *toPtr < *fromPtr:
 		log.Fatal(fmt.Sprintf("[%vERROR%v] From: %v and To: %v values don't make sense.\n", BrightRed, Reset, *fromPtr, *toPtr))
 	}
 
+	// Log file creation/opening
 	logFile, err := os.OpenFile("gogoanime-errors.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		log.Fatal(fmt.Sprintf("[%vFATAL%v] Failed to open/create log file.\n%v", BrightRed, Reset, err))
 	}
 	defer logFile.Close()
+
+	// Log configuration
 	log.SetOutput(logFile)
 	log.SetPrefix("main(): ")
 
+	// main loop
 	for i := *fromPtr; i <= *toPtr; i++ {
-		episodeLink := *urlPtr + strconv.Itoa(i)
+		var episode Episode
+		episode.PageLink = *urlPtr + strconv.Itoa(i)
 
 		fmt.Printf("[%v+%v] EPISODE %v\n", BrightGreen, Reset, i)
-		body, err := GetRequest(episodeLink)
+		body, err := GetRequest(episode.PageLink)
 		if err != nil {
 			log.Print(err)
-			fmt.Printf("[%vERROR%v] Failed to fetch URL: %v\n", BrightRed, Reset, episodeLink)
+			fmt.Printf("[%vERROR%v] Failed to fetch URL: %v\n", BrightRed, Reset, episode.PageLink)
 			continue
 		}
 		defer body.Body.Close()
 		fmt.Printf("\t[%v*%v] Connection to episode page succeeded.\n", BrightGreen, Reset)
 
 		bodyDoc, _ := html.Parse(body.Body)
-		var dowPgLink string
-		dowPgLinkParser(bodyDoc, &dowPgLink)
+		episode.GetDownloadPageLink(bodyDoc)
 
-		dowPgBody, err := GetRequest(dowPgLink)
+		dowPgBody, err := GetRequest(episode.DownloadPageLink)
 		if err != nil {
 			log.Print(err)
-			fmt.Printf("[%vERROR%v] Failed to fetch URL: %v\n", BrightRed, Reset, dowPgLink)
+			fmt.Printf("[%vERROR%v] Failed to fetch URL: %v\n", BrightRed, Reset, episode.DownloadPageLink)
 			continue
 		}
 		defer dowPgBody.Body.Close()
 		fmt.Printf("\t[%v*%v] Connection to download page succeeded.\n", BrightGreen, Reset)
 
 		dowPgBodyDoc, _ := html.Parse(dowPgBody.Body)
-		dowLinks := make(map[string]string)
-		dowLinkParser(dowPgBodyDoc, dowLinks)
+		episode.AllDownloadLinks = make(map[string]string)
+		episode.GetDownloadLinks(dowPgBodyDoc)
 
-		var dowLink, episodeQuality string
-		isKey := func(key string) bool { _, exists := dowLinks[key]; return exists }
+		var dnldLink string
 		switch {
-		case isKey("1080"):
-			episodeQuality = "1080P"
-			dowLink = dowLinks["1080"]
-		case isKey("720"):
-			episodeQuality = "720P"
-			dowLink = dowLinks["720"]
-		case isKey("480"):
-			episodeQuality = "480P"
-			dowLink = dowLinks["480"]
-		case isKey("360"):
-			episodeQuality = "360P"
-			dowLink = dowLinks["360"]
+		case episode.isRes("1080"):
+			episode.Resolution = "1080P"
+			dnldLink = episode.AllDownloadLinks["1080"]
+		case episode.isRes("720"):
+			episode.Resolution = "720P"
+			dnldLink = episode.AllDownloadLinks["720"]
+		case episode.isRes("480"):
+			episode.Resolution = "480P"
+			dnldLink = episode.AllDownloadLinks["480"]
+		case episode.isRes("360"):
+			episode.Resolution = "360P"
+			dnldLink = episode.AllDownloadLinks["360"]
 		}
 
-		fileResp, err := GetRequest(dowLink)
+		fmt.Printf("\t[%v*%v] Episode Resolution: %v\n", BrightGreen, Reset, episode.Resolution)
+
+		fileResp, err := GetRequest(dnldLink)
 		if err != nil {
 			log.Print(err)
-			fmt.Printf("[%vERROR%v] Failed to fetch URL: %v\n", BrightRed, Reset, dowLink)
+			fmt.Printf("[%vERROR%v] Failed to fetch URL: %v\n", BrightRed, Reset, dnldLink)
 			continue
 		}
 		defer fileResp.Body.Close()
 
-		fmt.Printf("\t[%v*%v] Episode Quality: %v\n", BrightGreen, Reset, episodeQuality)
-		fmt.Printf("\t[%v*%v] Episode Size: %v MB\n", BrightGreen, Reset, (fileResp.ContentLength / (1024 * 1024)))
+		episode.Size = uint64(fileResp.ContentLength)
+		fmt.Printf("\t[%v*%v] Episode Size: %.2f MB\n", BrightGreen, Reset, bytesToMB(episode.Size))
 
-		episodeFile, err := os.OpenFile(fmt.Sprintf("%v.mp4", i), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
-		if err != nil {
-			log.Print(err)
-			log.Fatal(fmt.Sprintf("[%vFATAL%v] Failed to create episode file.\n%v", BrightRed, Reset, err))
-		}
-		defer episodeFile.Close()
-
-		fmt.Printf("\t[%vDOWNLOADING%v] ...\n", BrightYellow, Reset)
-		_, err = io.Copy(episodeFile, fileResp.Body)
-		if err != nil {
-			log.Print(err)
+		if episode.Size == 0 {
+			log.Print(fmt.Errorf("content length is zero for episode %v (episode link: %v) (download link: %v)", i, episode.PageLink, dnldLink))
 			fmt.Printf("\t[%vERROR%v] Failed to download episode :(\n", BrightRed, Reset)
 			continue
 		}
-		fmt.Printf("\t[%vDONE%v] Episode download succeeded.\n", BrightGreen, Reset)
+
+		err = DownloadFile(fmt.Sprintf("%v.mp4", i), fileResp)
+		if err != nil {
+			log.Print(fmt.Errorf("DownloadFile(): Failed to download file %v. %v", fmt.Sprintf("%v.mp4", i), err))
+			fmt.Printf("\n\t[%vERROR%v] Failed to download episode :(\n", BrightRed, Reset)
+			continue
+		}
+		fmt.Printf("\n\t[%vDONE%v] Episode download succeeded.\n", BrightGreen, Reset)
 	}
 }
