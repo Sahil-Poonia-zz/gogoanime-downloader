@@ -26,6 +26,8 @@ it's pretty simple to use and should be very clear from help menu.
 
 If you want to add any new feature or improve the code or improve the project readme or any kind of help in genral would be great.
 
+if you are new to open source or Golang, consider it a playground.
+
 open for PRs and everybody is welcome 🤗
 
 ## License 📃
