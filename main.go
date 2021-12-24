@@ -37,7 +37,7 @@ func (e *Episode) isRes(res string) bool {
 	return exists
 }
 
-func (e *Episode) GetDownloadPageLink(n *html.Node) {
+func (e *Episode) SetDownloadPageLink(n *html.Node) {
 	if n.Type == html.ElementNode && n.Data == "li" && n.FirstChild != nil && n.FirstChild.Data == "a" {
 		for _, liAttr := range n.Attr {
 			if liAttr.Key == "class" && liAttr.Val == "dowloads" {
@@ -51,11 +51,11 @@ func (e *Episode) GetDownloadPageLink(n *html.Node) {
 	}
 
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		e.GetDownloadPageLink(c)
+		e.SetDownloadPageLink(c)
 	}
 }
 
-func (e *Episode) GetDownloadLinks(n *html.Node) {
+func (e *Episode) SetDownloadLinks(n *html.Node) {
 	if n.Type == html.ElementNode && n.Data == "a" {
 		for _, attr := range n.Attr {
 			if attr.Key == "download" {
@@ -76,7 +76,7 @@ func (e *Episode) GetDownloadLinks(n *html.Node) {
 	}
 
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		e.GetDownloadLinks(c)
+		e.SetDownloadLinks(c)
 	}
 }
 
@@ -185,7 +185,7 @@ func main() {
 		fmt.Printf("\t[%v*%v] Connection to episode page succeeded.\n", BrightGreen, Reset)
 
 		bodyDoc, _ := html.Parse(body.Body)
-		episode.GetDownloadPageLink(bodyDoc)
+		episode.SetDownloadPageLink(bodyDoc)
 
 		dowPgBody, err := GetRequest(episode.DownloadPageLink)
 		if err != nil {
@@ -198,7 +198,7 @@ func main() {
 
 		dowPgBodyDoc, _ := html.Parse(dowPgBody.Body)
 		episode.AllDownloadLinks = make(map[string]string)
-		episode.GetDownloadLinks(dowPgBodyDoc)
+		episode.SetDownloadLinks(dowPgBodyDoc)
 
 		var dnldLink string
 		switch {
