@@ -1,7 +1,6 @@
 # gogoanime-downloader 
 
-> :warning: **gogoanime did some some changes to their website. So, It won't work anymore.
-> I'll fix this soon enough :)**
+> :warning: **gogoanime did some some changes to their website. So, It won't work anymore.**
 
 gogoanime-downloader is a simple Go program to scrape and download a range of anime episodes from [gogoanime.wiki](https://gogoanime.wiki/)
 
